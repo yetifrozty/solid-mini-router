@@ -1,0 +1,40 @@
+{
+  "name": "@yetifrozty/solid-mini-router",
+  "version": "0.0.1",
+  "main": "index.js",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yetifrozty/solid-mini-router.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "scripts": {
+    
+  },
+  "exports": {
+    ".": {
+      "types": "./src/client.tsx",
+      "default": "./src/client.tsx",
+      "import": "./src/client.tsx"
+    },
+    "./A": {
+      "types": "./src/A.tsx",
+      "default": "./src/A.tsx",
+      "import": "./src/A.tsx"
+    },
+    "./router": {
+      "types": "./src/Router.tsx",
+      "default": "./src/Router.tsx",
+      "import": "./src/Router.tsx"
+    }
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "peerDependencies": {
+    "solid-js": "^1.9.7"
+  }
+}
