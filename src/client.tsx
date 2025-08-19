@@ -3,6 +3,7 @@ import { type JSX } from "solid-js/jsx-runtime";
 import ContextHolder from "./context.ts";
 import type { Request, Response } from "express";
 import { MetaProvider } from "@solidjs/meta";
+import { isServer } from "solid-js/web";
 
 export interface ClientAPI {
   url: URL;
@@ -30,7 +31,6 @@ function usePath(): Path {
   const [path, _setPath] = createSignal(currentPath());
   const reloadPath = () => {
     _setPath(currentPath());
-    window.history.replaceState({ historyIndex: Date.now() }, '', currentPath());
   }
   return [
     path,
@@ -40,23 +40,11 @@ function usePath(): Path {
 
 function createClientAPI(plugins: any[]): ClientAPI {
   const [path, setPath] = usePath();
-
-  const [currentGoto, setCurrentGoto] = createSignal<{newPath: string, replace?: boolean} | undefined>(undefined)
+  if (!isServer) {
+    history.scrollRestoration = 'manual';
+  }
 
   const [callbacks, setCallbacks] = createSignal<((newPath: string, replace?: boolean) => Promise<void>)[]>([])
-
-  createEffect(() => {
-    const current = currentGoto()
-    if (!current) return;
-    const before = untrack(callbacks).map(callback => callback(current.newPath, current.replace))
-
-    if (!before || !current) return
-
-    Promise.all(before).then(() => {
-      if (current !== untrack(currentGoto)) return;
-      goto(current.newPath, current.replace)
-    })
-  })
 
   function goto(newPath: string, replace?: boolean) {
     if (!newPath.startsWith("/") && !newPath.startsWith(window.location.origin)) {
@@ -79,25 +67,33 @@ function createClientAPI(plugins: any[]): ClientAPI {
 
   const getUrlObject = createMemo(() => new URL(path(), window.location.origin));
 
-  let [currentHistoryIndex, setCurrentHistoryIndex] = createSignal(0);
-  const scroll: Record<number, ScrollPosition> = JSON.parse(localStorage.getItem("scroll") || "{}");
+  const scroll: Record<number, ScrollPosition> = JSON.parse(sessionStorage.getItem("scroll") || "{}");
+
+  const currentHistoryIndex = createMemo(() => {
+    getUrlObject();
+    return window.history.state?.historyIndex || 0;
+  });
+
+  const scrollEntry = createMemo(() => {
+    return scroll[currentHistoryIndex()] || {x: 0, y: 0};
+  });
 
   const state = {
     get historyIndex() {
       return currentHistoryIndex();
     },
     get scrollEntry() {
-      return scroll[currentHistoryIndex()];
+      return scrollEntry();
     },
     set scrollEntry(value: ScrollPosition) {
       scroll[currentHistoryIndex()] = value;
-      localStorage.setItem("scroll", JSON.stringify(scroll));
+      sessionStorage.setItem("scroll", JSON.stringify(scroll));
     },
     get url() {
       return getUrlObject();
     },
     goto: (newPath: string, replace?: boolean) => {
-      setCurrentGoto({newPath, replace})
+      goto(newPath, replace)
     },
     beforeGoto: (callback: (newPath: string, replace?: boolean) => Promise<void>) => {
       onMount(() => {
@@ -113,23 +109,33 @@ function createClientAPI(plugins: any[]): ClientAPI {
     }
   }
 
-  const update = (event: PopStateEvent) => {
-    state.scrollEntry = {
+  const update = async (event: PopStateEvent) => {
+    const current = window.location.pathname + window.location.search + window.location.hash
+
+    const before = untrack(() => callbacks().map(callback => callback(current)))
+
+    try {
+      await Promise.all(before).then(() => {
+        const newCurrent = window.location.pathname + window.location.search + window.location.hash
+        if (current !== newCurrent) throw new Error("Callback changed the path");
+
+        return
+      })
+    } catch (error) {
+      return;
+    }
+
+    scroll[currentHistoryIndex()] = {
       x: window.scrollX,
       y: window.scrollY,
     };
+    sessionStorage.setItem("scroll", JSON.stringify(scroll));
 
     setPath();
 
-    const scrollPosition = event.state?.historyIndex ? scroll[event.state.historyIndex] : undefined;
-    if (scrollPosition) {
-      window.scrollTo(scrollPosition.x, scrollPosition.y);
-    } else {
-      
-      window.scrollTo(0, 0);
-    }
+    await new Promise(r => setTimeout(r, 0));
 
-    setCurrentHistoryIndex(event.state?.historyIndex || 0);
+    window.scrollTo(scrollEntry().x, scrollEntry().y);
   }
 
   // Listen to back/forward button navigation

@@ -1,5 +1,5 @@
 import { type JSX } from "solid-js/jsx-runtime";
-import { children, createComponent, createEffect, createMemo, createResource, createSignal, onCleanup, Show, Suspense, untrack } from "solid-js";
+import { children, createComponent, createEffect, createMemo, createResource, createRoot, createSignal, onCleanup, Show, Suspense, untrack } from "solid-js";
 
 const ROUTE = Symbol("route");
 
@@ -33,15 +33,23 @@ function Routes(props: { children: JSX.Element }): JSX.Element {
     return null;
   }, null, {equals: (a, b) => a === b});
 
+  let oldDispose: () => void = () => {};
+
   return createMemo((prev: any) => {
     const route = currentRoute();
     if (!route) {return null}
     const [ready, setReady] = createSignal<boolean>(false);
-
-    const resolvedChildren = <Suspense fallback={<OnDestroy callback={() => {setReady(true)}} />}>{route.children}<InstantResource /></Suspense>
+    const [resolvedChildren, dispose] = createRoot((dispose) => {
+      return [
+        (<Suspense fallback={<OnDestroy callback={() => {setReady(true)}} />}>{route.children}<InstantResource /></Suspense>),
+        dispose
+      ]
+    })
 
     return createMemo(() => {
       if (ready() || !prev) {
+        oldDispose();
+        oldDispose = dispose;
         return resolvedChildren
       }
       return prev
