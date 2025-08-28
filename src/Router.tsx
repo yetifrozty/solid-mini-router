@@ -1,5 +1,6 @@
 import { type JSX } from "solid-js/jsx-runtime";
-import { children, createComponent, createEffect, createMemo, createResource, createRoot, createSignal, onCleanup, Show, Suspense, untrack } from "solid-js";
+import { children, createComponent, createEffect, createMemo, createResource, createRoot, createSignal, onCleanup, onMount, Show, Suspense, untrack } from "solid-js";
+import { isServer } from "solid-js/web";
 
 const ROUTE = Symbol("route");
 
@@ -33,28 +34,73 @@ function Routes(props: { children: JSX.Element }): JSX.Element {
     return null;
   }, null, {equals: (a, b) => a === b});
 
-  let oldDispose: () => void = () => {};
+  interface Root {
+    node: JSX.Element;
+    dispose: () => void;
+    ready: boolean;
+    deprecate: () => void;
+  }
 
-  return createMemo((prev: any) => {
+  const staged = createMemo((prev: Root | undefined) => {
+    prev?.deprecate();
+    let deprecated = false;
     const route = currentRoute();
-    if (!route) {return null}
+    if (!route) {return undefined}
     const [ready, setReady] = createSignal<boolean>(false);
+    const adopt = async () => {
+      if (deprecated) {
+        await Promise.resolve();
+        dispose();
+        return;
+      }
+      setReady(true);
+    }
     const [resolvedChildren, dispose] = createRoot((dispose) => {
       return [
-        (<Suspense fallback={<OnDestroy callback={() => {setReady(true)}} />}>{route.children}<InstantResource /></Suspense>),
+        (<Suspense fallback={<OnDestroy callback={adopt} />}>{route.children}<InstantResource /></Suspense>),
         dispose
       ]
     })
 
-    return createMemo(() => {
-      if (ready() || !prev) {
-        oldDispose();
-        oldDispose = dispose;
-        return resolvedChildren
+    return {
+      node: resolvedChildren,
+      dispose,
+      get ready() {
+        try {
+          return ready();
+        } catch (e) {
+          return false;
+        }
+      },
+      deprecate: () => {
+        deprecated = true;
       }
-      return prev
-    })
+    }
     
+  })
+
+  const adopted = createMemo((prev: Root | undefined) => {
+    const currentStaged = staged();
+    if (!currentStaged) {
+      if (prev) prev.dispose(); // optional: clean up when no route
+      return undefined;
+    }
+    if (isServer) {
+      return currentStaged;
+    }
+    if (currentStaged.ready || !prev) {
+      if (prev && prev !== currentStaged) prev.dispose(); // don't dispose the same instance
+      return currentStaged;
+    }
+    return prev;
+  })
+
+  return createMemo(() => {
+    const currentAdopted = adopted();
+    if (currentAdopted) {
+      return currentAdopted.node;
+    }
+    return null;
   }) as unknown as JSX.Element
 }
 
