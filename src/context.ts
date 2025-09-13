@@ -1,17 +1,5 @@
-import { Accessor, createContext, type Context } from "solid-js";
+import { createContext, type Context } from "solid-js";
 import type { ClientAPI } from "./client.tsx";
-
-export interface RouteState {
-  done: () => void;
-  delete: () => void;
-  id: number;
-}
-
-export interface RouterState {
-  createRoute: (condition: () => boolean) => RouteState;
-  currentRoute: Accessor<number>;
-  currentProspect: Accessor<number>;
-}
 
 type ClientContext = Context<ClientAPI | undefined>;
 

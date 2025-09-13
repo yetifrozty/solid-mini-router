@@ -1,5 +1,5 @@
 import { type JSX } from "solid-js/jsx-runtime";
-import { children, createComponent, createEffect, createMemo, createResource, createRoot, createSignal, onCleanup, onMount, Show, Suspense, untrack } from "solid-js";
+import { Accessor, children, createComponent, createEffect, createMemo, createResource, createRoot, createSignal, onCleanup, onMount, Show, Suspense, untrack } from "solid-js";
 import { isServer } from "solid-js/web";
 
 const ROUTE = Symbol("route");
@@ -10,19 +10,29 @@ type RouteObject = {
   children: JSX.Element;
 };
 
-function Routes(props: { children: JSX.Element }): JSX.Element {
-  // Solid helper that gives you a function returning the *current* children.
-  const raw = children(() => props.children);
+interface Root {
+  node: JSX.Element;
+  dispose: () => void;
+  ready: boolean;
+  deprecate: () => void;
+}
 
+function useRoutes(routes: Accessor<JSX.Element>): Accessor<RouteObject[]> {
+  const raw = children(routes);
+  
   // Each time the children change (Show toggles, For adds/removes),
   // this memo re-filters them for objects whose $$type === ROUTE.
-  const getRoutes = createMemo<RouteObject[]>(() => {
+  const getRoutes = createMemo(() => {
     const ch = raw();
     // children() can return a single item or an array
     const list = Array.isArray(ch) ? ch : [ch];
     return list.filter((n: any): n is RouteObject => n && (n as any).$$type === ROUTE) as unknown as RouteObject[];
   });
-  
+
+  return getRoutes;
+}
+
+function useRouter(getRoutes: Accessor<RouteObject[]>): Accessor<RouteObject | null> {
   const currentRoute = createMemo(() => {
     const routes = getRoutes();
     for (let i = 0; i < routes.length; i++) {
@@ -33,13 +43,13 @@ function Routes(props: { children: JSX.Element }): JSX.Element {
     }
     return null;
   }, null, {equals: (a, b) => a === b});
+  return currentRoute;
+}
 
-  interface Root {
-    node: JSX.Element;
-    dispose: () => void;
-    ready: boolean;
-    deprecate: () => void;
-  }
+function Routes(props: { children: JSX.Element }): JSX.Element {
+  
+  const getRoutes = useRoutes(() => props.children);
+  const currentRoute = useRouter(getRoutes);
 
   const staged = createMemo((prev: Root | undefined) => {
     prev?.deprecate();
@@ -49,7 +59,7 @@ function Routes(props: { children: JSX.Element }): JSX.Element {
     const [ready, setReady] = createSignal<boolean>(false);
     const adopt = async () => {
       if (deprecated) {
-        await Promise.resolve();
+        await Promise.resolve(); // prevents infinite loop
         dispose();
         return;
       }

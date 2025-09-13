@@ -2,7 +2,6 @@ import { Accessor, createEffect, createMemo, createSignal, onCleanup, onMount, u
 import { type JSX } from "solid-js/jsx-runtime";
 import ContextHolder from "./context.ts";
 import type { Request, Response } from "express";
-import { MetaProvider } from "@solidjs/meta";
 import { isServer } from "solid-js/web";
 
 export interface ClientAPI {
@@ -24,22 +23,9 @@ interface ScrollPosition {
   y: number;
 }
 
-type Path = readonly [Accessor<string>, () => void];
-
-function usePath(): Path {
-  const currentPath = () => window.location.pathname + window.location.search + window.location.hash;
-  const [path, _setPath] = createSignal(currentPath());
-  const reloadPath = () => {
-    _setPath(currentPath());
-  }
-  return [
-    path,
-    reloadPath,
-  ] as const;
-}
-
 function createClientAPI(plugins: any[]): ClientAPI {
-  const [path, setPath] = usePath();
+  const getCurrentPath = () => window.location.pathname + window.location.search + window.location.hash;
+  const [path, setPath] = createSignal(getCurrentPath());
   if (!isServer) {
     history.scrollRestoration = 'manual';
   }
@@ -131,7 +117,7 @@ function createClientAPI(plugins: any[]): ClientAPI {
     };
     sessionStorage.setItem("scroll", JSON.stringify(scroll));
 
-    setPath();
+    setPath(getCurrentPath());
 
     await new Promise(r => setTimeout(r, 0));
 
