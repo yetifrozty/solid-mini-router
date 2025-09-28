@@ -7,10 +7,13 @@ This is a minimal routing library for SolidJS and the plugin system. It is not a
 -   Minimal API
 -   Client-side and Server-side rendering support
 -   Scroll position restoration
+-   Plugin-system integration (`injectMinimalRouter`)
+-   Simple `Route` composition with `when` conditions
+-   SSR-aware `fetch` and server-only middleware (`ServerMiddleware`)
 
 ## Philosophy
 
-This router is designed to be as simple as possible. It does not have a concept of route matching or params. Instead, it provides a `Routes` component that renders the first child `Route` component whose `when` prop is true. This makes the router very flexible and allows you to use any logic you want to determine which route to render.
+This router is designed to be as simple as possible. There’s no built-in path matching or params; you decide what matches by writing `when` expressions. At runtime the router renders the first `Route` that matches (top-down), and you can nest routes by composing `Route` elements.
 
 ## Installation
 
@@ -18,95 +21,142 @@ This router is designed to be as simple as possible. It does not have a concept 
 npm install @yetifrozty/solid-mini-router
 ```
 
-## Usage
+## Usage (with the plugin system)
 
-Here is a simple example of how to use the router.
+The recommended setup is via the plugin system. Inject the router in your boot plugin, then register client/server apps that declare routes.
 
-First, you need to wrap your application in the `ClientAPIProvider`. This will provide the routing context to your application.
+### 1) Inject the router in your boot plugin
 
-**index.tsx**
-```tsx
-import { render } from 'solid-js/web';
-import { ClientAPIProvider } from './minimal-routing/src/client';
-import App from './App';
+```ts
+// boot.ts / boot.js
+import { injectMinimalRouter } from '@yetifrozty/solid-mini-router/plugin';
 
-render(() => (
-  <ClientAPIProvider plugins={[]}>
-    <App />
-  </ClientAPIProvider>
-), document.getElementById('root'));
+function myBootPlugin() {
+  let plugins = [] as any[];
+  return {
+    name: 'my-boot',
+    init: async (_plugins) => {
+      plugins = _plugins;
+      await injectMinimalRouter(plugins);
+    },
+    configureVite: async (vite) => {
+      vite.clientPluginModules.push('my-plugin/client');
+      vite.serverPluginModules.push('my-plugin/server');
+      return vite;
+    }
+  };
+}
+export default myBootPlugin;
 ```
 
-Then, you can use the `Routes`, `Route`, and `A` components in your application.
+### 2) Declare client routes
 
-**App.tsx**
 ```tsx
-import { Routes, Route } from './minimal-routing/src/Router';
-import { useClientAPI } from './minimal-routing/src/client';
-import A from './minimal-routing/src/A';
+// client.tsx
+import { createSolidApp } from '@yetifrozty/solid-mini-router/plugin/utils';
+import { Route } from '@yetifrozty/solid-mini-router/router';
+import { useClientAPI } from '@yetifrozty/solid-mini-router';
+import Home from './Home';
+
+const clientPlugin = createSolidApp(() => {
+  const api = useClientAPI();
+  return (
+    <Route when={api.url.pathname === '/' || api.url.pathname === ''} component={Home} />
+  );
+}, { name: 'my-client' });
+
+export default clientPlugin;
+```
+
+### 3) Optional: server routes and middleware
+
+```tsx
+// server.tsx
+import { createSolidApp } from '@yetifrozty/solid-mini-router/plugin/utils';
+import { Route, ServerMiddleware } from '@yetifrozty/solid-mini-router/router';
+import { useClientAPI } from '@yetifrozty/solid-mini-router';
+import { json } from 'express';
+
+function ApiRoute() {
+  const api = useClientAPI();
+  return (
+    <Route when={api.url.pathname === '/api'}>
+      <ServerMiddleware>{json()}</ServerMiddleware>
+      <ServerMiddleware>{(req, res) => { res.send(req.body?.stuff); }}</ServerMiddleware>
+    </Route>
+  );
+}
+
+const serverPlugin = createSolidApp(() => <ApiRoute />, { name: 'my-server' });
+export default serverPlugin;
+```
+
+## Optional: standalone usage (without plugin system)
+
+You can also use the primitives directly if you’re not using the plugin system.
+
+```tsx
+import { render } from 'solid-js/web';
+import { ClientAPIProvider, useClientAPI } from '@yetifrozty/solid-mini-router';
+import { Router, Route } from '@yetifrozty/solid-mini-router/router';
+import A from '@yetifrozty/solid-mini-router/A';
 
 function App() {
-  const client = useClientAPI();
-  const path = () => client.url.pathname;
-
+  const api = useClientAPI();
   return (
     <>
       <nav>
         <A href="/">Home</A>
         <A href="/about">About</A>
-        <A href="/contact">Contact</A>
       </nav>
-      <Routes>
-        <Route when={path() === '/'}>
-          <h1>Home</h1>
-        </Route>
-        <Route when={path() === '/about'}>
-          <h1>About</h1>
-        </Route>
-        <Route when={path() === '/contact'}>
-          <h1>Contact</h1>
-        </Route>
-      </Routes>
+      <Router>
+        <Route when={api.url.pathname === '/'} component={() => <h1>Home</h1>} />
+        <Route when={api.url.pathname === '/about'} component={() => <h1>About</h1>} />
+      </Router>
     </>
   );
 }
 
-export default App;
+render(() => (
+  <ClientAPIProvider plugins={[]}> 
+    <App />
+  </ClientAPIProvider>
+), document.getElementById('root')!);
 ```
 
 ## API
 
-### `ClientAPIProvider`
+### `Route` and `Router` (from `@yetifrozty/solid-mini-router/router`)
 
-A context provider that provides the routing context to your application.
+-   **`Route`**: Declarative unit with a `when` condition. Use `component={MyComponent}` or nest child `Route`s for grouping. The first matching `Route` renders.
+-   **`Router`**: Top-level container that resolves and renders the first matching `Route` in its children tree (used directly in standalone; provided for you in the plugin setup).
 
-**Props**
--   `plugins`: An array of plugins. (Read more at github.com/yetifrozty/base-plugin-system).
--   `req` (SSR only): The Express request object.
--   `res` (SSR only): The Express response object.
+### `ServerMiddleware` (from `@yetifrozty/solid-mini-router/router`)
 
-### `useClientAPI`
+Runs an Express-compatible middleware on the server within a `Route`. If the middleware sends a response, routing short-circuits; otherwise it continues.
 
-A hook that returns the client API object.
+### `ClientAPIProvider` and `useClientAPI` (from `@yetifrozty/solid-mini-router`)
 
-**Returns**
--   `url`: The current URL as a URL object. Reactive.
--   `goto`: A function to navigate to a new URL.
--   `historyIndex`: The current index in the history. Reactive.
--   `scrollEntry`: The scroll position for the current history entry.
+Context provider and hook for routing state and helpers.
 
-### `Routes`
+**Hook returns**
+-   `url`: Reactive `URL` for the current location
+-   `goto(url, replace?)`: Navigate (client-side). External URLs fall back to `window.location`
+-   `beforeGoto(cb)`: Register async guards before navigation
+-   `historyIndex`: Reactive history entry id
+-   `scrollEntry`: Per-entry scroll position; restored on nav
+-   `fetch`: SSR-aware fetch that propagates cookies to same-site requests
+-   `ssr?.req`/`ssr?.res`: Express request/response on the server
+-   `plugins`: The plugin array
 
-A component that renders the first child `Route` component whose `when` prop is true.
+### `A` (default export from `@yetifrozty/solid-mini-router/A`)
 
-### `Route`
+Drop-in `<a>` that intercepts same-origin navigations and calls `goto`. Honors modifier keys, right-clicks, `_blank`, external links, and hash links.
 
-A component that renders its children when its `when` prop is true. Needs to be used directly inside a Routes component.
+### `createSolidApp` (from `@yetifrozty/solid-mini-router/plugin/utils`)
 
-**Props**
--   `when`: A boolean that determines whether to render the component.
--   `children`: The content to render.
+Helper to declare a plugin that contributes Solid routes: `createSolidApp(Component, { name })` → plugin with `solidRoutes()`.
 
-### `A`
+### `injectMinimalRouter` (from `@yetifrozty/solid-mini-router/plugin`)
 
-A wrapper around the `<a>` tag that uses the router to navigate. It supports all the props of a normal `<a>` tag. 
+Ensures the minimal router’s client/server plugins are present and wired into Vite and Express.

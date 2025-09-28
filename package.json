@@ -1,6 +1,6 @@
 {
   "name": "@yetifrozty/solid-mini-router",
-  "version": "0.0.3",
+  "version": "1.0.0",
   "main": "index.js",
   "type": "module",
   "repository": {
@@ -28,6 +28,22 @@
       "types": "./src/Router.tsx",
       "default": "./src/Router.tsx",
       "import": "./src/Router.tsx"
+    },
+    "./plugin": {
+      "types": "./src/plugin/boot.d.ts",
+      "import": "./src/plugin/boot.js"
+    },
+    "./plugin/client": {
+      "types": "./src/plugin/client.tsx",
+      "import": "./src/plugin/client.tsx"
+    },
+    "./plugin/server": {
+      "types": "./src/plugin/server.ts",
+      "import": "./src/plugin/server.ts"
+    },
+    "./plugin/utils": {
+      "types": "./src/plugin/utils.ts",
+      "import": "./src/plugin/utils.ts"
     }
   },
   "keywords": [],
