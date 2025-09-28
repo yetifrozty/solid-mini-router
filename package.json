@@ -1,6 +1,6 @@
 {
   "name": "@yetifrozty/solid-mini-router",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "index.js",
   "type": "module",
   "repository": {
@@ -10,9 +10,7 @@
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
   },
-  "scripts": {
-    
-  },
+  "scripts": {},
   "exports": {
     ".": {
       "types": "./src/client.tsx",
@@ -52,5 +50,8 @@
   "description": "",
   "peerDependencies": {
     "solid-js": "^1.9.7"
+  },
+  "dependencies": {
+    "@solidjs/meta": "^0.29.4"
   }
 }
