@@ -1,8 +1,21 @@
+
+
 import { type JSX } from "solid-js/jsx-runtime";
-import { Accessor, children, Component, createComponent, createEffect, createMemo, createResource, createRoot, createSignal, onCleanup, onMount, ParentComponent, Resource, Setter, Show, Suspense, untrack } from "solid-js";
+import { Accessor, children, Component, createComponent, createEffect, createMemo, createResource, createRoot, createSignal, onCleanup, onMount, ParentComponent, Resource, Show, Suspense, untrack } from "solid-js";
 import { isServer } from "solid-js/web";
-import { Request, Response, NextFunction } from "express";
 import { useClientAPI } from "./client.tsx";
+import { Request, Response, NextFunction } from "express";
+
+interface EndRouteProps {
+  component: Component;
+  when?: boolean;
+}
+interface ParentRouteProps {
+  children: JSX.Element;
+  when?: boolean;
+  layout?: ParentComponent;
+}
+type RouteProps = EndRouteProps | ParentRouteProps;
 
 const ROUTE = Symbol("route");
 
@@ -19,9 +32,7 @@ interface Root {
   deprecate: () => void;
 }
 
-type Routes = Accessor<RouteObject[]>
-
-function useRoutes(routes: Accessor<JSX.Element>): Routes {
+function useRoutes(routes: Accessor<JSX.Element>): Accessor<RouteObject[]> {
   const raw = children(routes);
   
   // Each time the children change (Show toggles, For adds/removes),
@@ -36,29 +47,53 @@ function useRoutes(routes: Accessor<JSX.Element>): Routes {
   return getRoutes;
 }
 
-type CurrentRoute = Accessor<RouteObject | null>
-
-function useRouter(getRoutes: Accessor<RouteObject[]>, condition?: Accessor<boolean>): CurrentRoute {
-  const currentRoute = createMemo(() => {
-    if (condition && !condition()) {
-      return null;
-    }
+function useRouter(getRoutes: Accessor<RouteObject[]>): Accessor<RouteObject | null> {
+  const getCurrentRouteIndex = () => {
     const routes = getRoutes();
     for (let i = 0; i < routes.length; i++) {
       const route = routes[i];
       if (route.when) {
-        return route;
+        return i;
       }
     }
     return null;
-  }, null, {equals: (a, b) => a === b});
+  }
+
+  let initialIndex: number | null = isServer ? getCurrentRouteIndex() : null;
+  const [routeIndex, setRouteIndex] = createSignal<number | null>(initialIndex);
+
+  const [initialIndexResource] = createResource(() => initialIndex, async (i) => {return i});
+  // const initialIndexResource = createMemo(() => initialIndex);
+  
+  createEffect(() => {
+    setRouteIndex(getCurrentRouteIndex());
+  });
+
+
+  const currentRoute = createMemo(() => {
+    const index = routeIndex() ?? initialIndexResource();
+    if (index == null) {
+      return null;
+    }
+    return getRoutes()[index];
+  });
   return currentRoute;
 }
 
-type Staged = Accessor<Root | undefined>
+function Router(props: { children: JSX.Element, onMatchChange?: (matched: boolean) => void }): JSX.Element {
+  
+  const getRoutes = useRoutes(() => props.children);
+  const currentRoute = useRouter(getRoutes);
 
-function useStaged(currentRoute: CurrentRoute): Staged {
-  return createMemo((prev: Root | undefined) => {
+  if (isServer) {
+    props.onMatchChange?.(Boolean(currentRoute()));
+  }
+
+  createEffect(() => {
+    props.onMatchChange?.(Boolean(currentRoute()));
+  });
+
+  const staged = createMemo((prev: Root | undefined) => {
     prev?.deprecate();
     let deprecated = false;
     const route = currentRoute();
@@ -93,13 +128,10 @@ function useStaged(currentRoute: CurrentRoute): Staged {
         deprecated = true;
       }
     }
+    
   })
-}
 
-type Adopted = Staged
-
-function useAdopted(staged: Staged): Adopted {
-  return createMemo((prev: Root | undefined) => {
+  const adopted = createMemo((prev: Root | undefined) => {
     const currentStaged = staged();
     if (!currentStaged) {
       if (prev) prev.dispose(); // optional: clean up when no route
@@ -114,24 +146,14 @@ function useAdopted(staged: Staged): Adopted {
     }
     return prev;
   })
-}
 
-function Router(props: { children: JSX.Element, onMatchChange?: (matched: boolean) => void }): JSX.Element {
-  const getRoutes = useRoutes(() => props.children);
-  const currentRoute = useRouter(getRoutes);
-
-  const staged = useStaged(currentRoute);
-  const adopted = useAdopted(staged);
-
-  if (isServer) {
-    props.onMatchChange?.(Boolean(adopted()));
-  }
-
-  createEffect(() => {
-    props.onMatchChange?.(Boolean(adopted()));
-  });
-
-  return <>{adopted()?.node}</>
+  return createMemo(() => {
+    const currentAdopted = adopted();
+    if (currentAdopted) {
+      return currentAdopted.node;
+    }
+    return null;
+  }) as unknown as JSX.Element
 }
 
 function OnDestroy(props: { callback: () => void }) {
@@ -143,21 +165,11 @@ function InstantResource() {
   const [instant] = createResource(async () => null)
   return <>{instant()}</>
 }
-interface EndRouteProps {
-  component: Component;
-  when?: boolean;
-}
-interface ParentRouteProps {
-  children: JSX.Element;
-  when?: boolean;
-  layout?: ParentComponent;
-}
-type RouteProps = EndRouteProps | ParentRouteProps;
 
 function EndRoute(props: EndRouteProps): JSX.Element {
   return {
     get children() {
-      return createComponent(props.component, {});
+      return <props.component />;
     },
     get when() {
       return props.when ?? true;
@@ -166,37 +178,44 @@ function EndRoute(props: EndRouteProps): JSX.Element {
   } as any;
 }
 
-function DefaultLayout(props: { children: JSX.Element }): JSX.Element {
-  return <>{props.children}</>;
-}
-
-function RoutesFromRoutes(props: { children: JSX.Element, when?: boolean, currentRouteCallback: (currentRoute: CurrentRoute) => void }): JSX.Element {
-  const getRoutes = useRoutes(() => props.children);
-  const currentRoute = useRouter(getRoutes, () => props.when ?? true);
-  props.currentRouteCallback(currentRoute);
-  const staged = useStaged(currentRoute);
-  const adopted = useAdopted(staged);
-  return <>{adopted()?.node}</>;
+function DefaultLayout(props: { children: JSX.Element }) {
+  return props.children;
 }
 
 function ParentRoute(props: ParentRouteProps): JSX.Element {
+  let child: JSX.Element;
+
   const Layout = props.layout || DefaultLayout;
-  let currentRoute!: CurrentRoute;
-  const setCurrentRoute = (route: CurrentRoute) => {
-    currentRoute = route;
+  let matched = false;
+
+  function setMatched(m: boolean) {
+    matched = m;
   }
-  const children = <Layout><RoutesFromRoutes when={props.when} currentRouteCallback={setCurrentRoute}>{props.children}</RoutesFromRoutes></Layout>
-  
+
+  function initChildren() {
+    if (!isServer && child) {
+      return;
+    }
+    child = <Layout><Router onMatchChange={setMatched}>{props.children}</Router></Layout>;
+    return child;
+  }
   return {
     get children() {
-      return children;
+      initChildren();
+      return child;
     },
     get when() {
-      return Boolean(currentRoute());
+      if (props.when === false) {
+        return false;
+      }
+      initChildren();
+      return matched;
     },
     $$type: ROUTE as any,
   } as any;
 }
+
+export { Router, Route };
 
 function Route(props: RouteProps): JSX.Element {
   if ("component" in props) {
@@ -262,5 +281,3 @@ export function ServerMiddleware(props: { children: (req: Request, res: Response
     component: () => null,
   });
 }
-
-export { Router, Route };
