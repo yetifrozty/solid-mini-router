@@ -10,6 +10,7 @@ export interface ClientAPI {
   beforeGoto: (callback: (newPath: string, replace?: boolean) => Promise<void>) => void;
   historyIndex: number;
   scrollEntry: ScrollPosition;
+  isHydrating: boolean;
   ssr?: {
     req: Request,
     res: Response
@@ -29,6 +30,12 @@ function createClientAPI(plugins: any[]): ClientAPI {
   if (!isServer) {
     history.scrollRestoration = 'manual';
   }
+
+  const [isHydrating, setIsHydrating] = createSignal(!isServer);
+
+  onMount(() => {
+    setIsHydrating(false);
+  });
 
   const [callbacks, setCallbacks] = createSignal<((newPath: string, replace?: boolean) => Promise<void>)[]>([])
 
@@ -92,6 +99,9 @@ function createClientAPI(plugins: any[]): ClientAPI {
     plugins,
     fetch: (...args: Parameters<typeof fetch>) => {
       return fetch(...args);
+    },
+    get isHydrating() {
+      return isHydrating();
     }
   }
 
@@ -138,6 +148,7 @@ function createSSRAPI(url: URL, req: Request, res: Response, plugins: any[]): Cl
     beforeGoto: () => {},
     historyIndex: 0,
     scrollEntry: { x: 0, y: 0 },
+    isHydrating: false,
     ssr: {
       req,
       res

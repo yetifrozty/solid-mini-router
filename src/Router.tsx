@@ -80,20 +80,8 @@ function useRouter(getRoutes: Accessor<RouteObject[]>): Accessor<RouteObject | n
   return currentRoute;
 }
 
-function Router(props: { children: JSX.Element, onMatchChange?: (matched: boolean) => void }): JSX.Element {
-  
-  const getRoutes = useRoutes(() => props.children);
-  const currentRoute = useRouter(getRoutes);
-
-  if (isServer) {
-    props.onMatchChange?.(Boolean(currentRoute()));
-  }
-
-  createEffect(() => {
-    props.onMatchChange?.(Boolean(currentRoute()));
-  });
-
-  const staged = createMemo((prev: Root | undefined) => {
+function useStaged(currentRoute: Accessor<RouteObject | null>) {
+  return createMemo((prev: Root | undefined) => {
     prev?.deprecate();
     let deprecated = false;
     const route = currentRoute();
@@ -131,7 +119,10 @@ function Router(props: { children: JSX.Element, onMatchChange?: (matched: boolea
     
   })
 
-  const adopted = createMemo((prev: Root | undefined) => {
+}
+
+function useAdopted(staged: Accessor<Root | undefined>) {
+  return createMemo((prev: Root | undefined) => {
     const currentStaged = staged();
     if (!currentStaged) {
       if (prev) prev.dispose(); // optional: clean up when no route
@@ -146,14 +137,34 @@ function Router(props: { children: JSX.Element, onMatchChange?: (matched: boolea
     }
     return prev;
   })
+}
 
-  return createMemo(() => {
-    const currentAdopted = adopted();
-    if (currentAdopted) {
-      return currentAdopted.node;
-    }
-    return null;
-  }) as unknown as JSX.Element
+function RenderRoute(props: { currentRoute: Accessor<RouteObject | null> }) {
+  const staged = useStaged(props.currentRoute);
+  const adopted = useAdopted(staged);
+
+  return <>{adopted()?.node}</>
+}
+
+function Router(props: { children: JSX.Element, layout?: ParentComponent, onMatchChange?: (matched: boolean) => void }): JSX.Element {
+  
+  const getRoutes = useRoutes(() => props.children);
+  const currentRoute = useRouter(getRoutes);
+  const Layout = props.layout || DefaultLayout;
+
+  if (isServer) {
+    props.onMatchChange?.(Boolean(currentRoute()));
+  }
+
+  createEffect(() => {
+    props.onMatchChange?.(Boolean(currentRoute()));
+  });
+
+  return <Show when={currentRoute()}>
+    <Layout>
+      <RenderRoute currentRoute={currentRoute} />
+    </Layout>
+  </Show>
 }
 
 function OnDestroy(props: { callback: () => void }) {
@@ -178,7 +189,7 @@ function EndRoute(props: EndRouteProps): JSX.Element {
   } as any;
 }
 
-function DefaultLayout(props: { children: JSX.Element }) {
+function DefaultLayout(props: { children?: JSX.Element }) {
   return props.children;
 }
 
@@ -192,13 +203,22 @@ function ParentRoute(props: ParentRouteProps): JSX.Element {
     matched = m;
   }
 
+  function getChildren() {
+    return <Router onMatchChange={setMatched} layout={Layout}>{props.children}</Router>;
+  }
+
   function initChildren() {
     if (!isServer && child) {
       return;
     }
-    child = <Layout><Router onMatchChange={setMatched}>{props.children}</Router></Layout>;
+    child = getChildren();
     return child;
   }
+
+  if (!isServer) {
+    child = getChildren();
+  }
+  
   return {
     get children() {
       initChildren();
